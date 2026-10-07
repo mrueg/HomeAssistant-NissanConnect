@@ -480,3 +480,23 @@ def test_api_requests_time_out(requests_mock):
 
     assert requests_mock.request_history
     assert all(r.timeout == REQUEST_TIMEOUT for r in requests_mock.request_history)
+
+
+def test_optional_fetch_warning_does_not_log_the_full_vin(requests_mock, caplog):
+    """Request errors carry the URL, and the URL carries the VIN."""
+    vehicle = _vehicle(requests_mock, model="LEAF")
+    vehicle.battery_status_last_updated = None
+    requests_mock.get(f"{CAR_BASE_URL}v1/cars/TEST-VIN/battery-status", json={})
+    requests_mock.get(
+        f"{CAR_BASE_URL}v1/cars/TEST-VIN/cockpit",
+        exc=requests.ConnectionError(
+            "Max retries exceeded with url: /car-adapter/v1/cars/TEST-VIN/cockpit"))
+
+    with patch("custom_components.nissan_connect.kamereon.kamereon.time.sleep"):
+        vehicle.fetch_all()
+
+    ours = "\n".join(r.getMessage() for r in caplog.records
+                     if r.name.startswith("custom_components.nissan_connect"))
+    assert "fetch_cockpit failed for #VIN" in ours
+    assert "/cars/***VIN/cockpit" in ours
+    assert "TEST-VIN" not in ours
